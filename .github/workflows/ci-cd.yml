@@ -17,9 +17,14 @@ on:
       - 'LICENSE'
   workflow_dispatch:
 
+# GHCR(컨테이너 레지스트리) 이미지 발행 권한 부여
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   # ========================================================
-  # 1. 어떤 영역의 코드가 변경되었는지 감지 (Path Filter)
+  # 1. 변경된 디렉터리 감지 (Path Filter)
   # ========================================================
   detect-changes:
     name: Detect Changed Paths
@@ -47,7 +52,7 @@ jobs:
               - '.github/**'
 
   # ========================================================
-  # 2. 백엔드 코드 변경 시에만 실행되는 빌드 & 테스트
+  # 2. 백엔드 코드 검증 (PR / Push 시 실행)
   # ========================================================
   backend-ci:
     name: Backend Test (Java 21 / Spring Boot)
@@ -73,10 +78,10 @@ jobs:
         run: ./gradlew check
 
   # ========================================================
-  # 3. 프론트엔드 코드 변경 시에만 실행되는 빌드
+  # 3. 프론트엔드 코드 검증 (PR / Push 시 실행)
   # ========================================================
   frontend-ci:
-    name: Frontend Build (React 19 / Vite)
+    name: Frontend Build Check (React 19 / Vite)
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
@@ -100,10 +105,10 @@ jobs:
         run: npm run build
 
   # ========================================================
-  # 4. 서버 원격 자동 배포 (main 브랜치 푸시 시)
+  # 4. CI 러너에서 이미지 빌드 및 GHCR 푸시 (main 브랜치 푸시 시)
   # ========================================================
-  deploy:
-    name: Deploy to Server via SSH
+  build-and-push:
+    name: Build & Push Images to GHCR
     needs: [detect-changes, backend-ci, frontend-ci]
     runs-on: ubuntu-latest
     if: |
@@ -113,61 +118,117 @@ jobs:
       (needs.backend-ci.result == 'success' || needs.backend-ci.result == 'skipped') &&
       (needs.frontend-ci.result == 'success' || needs.frontend-ci.result == 'skipped') &&
       !(needs.backend-ci.result == 'failure' || needs.frontend-ci.result == 'failure') &&
-      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.infra == 'true')
-
+      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true')
     steps:
-      - name: Check if Deployment Secrets are configured
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 백엔드 변경 시: JAR 빌드 후 백엔드 도커 이미지 푸시
+      - name: Set up JDK 21 (Backend Packaging)
+        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Build Backend JAR
+        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          chmod +x backend/gradlew
+          cd backend && ./gradlew bootJar -x test
+
+      - name: Build & Push Backend Docker Image
+        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
+
+      # 프론트엔드 변경 시: 프론트엔드 도커 이미지 푸시
+      - name: Build & Push Frontend Docker Image
+        if: needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:latest
+            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+
+  # ========================================================
+  # 5. 서버 원격 배포 (서버 빌드 제거, 경량 이미지 Pull & 갱신)
+  # ========================================================
+  deploy:
+    name: Deploy to Server via SSH
+    needs: [detect-changes, build-and-push]
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') &&
+      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.infra == 'true')
+    steps:
+      - name: Check Secrets
         id: check_secrets
         run: |
           if [ -n "${{ secrets.SERVER_HOST }}" ] && [ -n "${{ secrets.SERVER_USER }}" ] && [ -n "${{ secrets.SERVER_SSH_KEY }}" ]; then
             echo "configured=true" >> $GITHUB_OUTPUT
           else
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "⚠️ [안내] SERVER_HOST / USER / SSH_KEY Secrets가 아직 등록되지 않아 SSH 배포를 건너뜁니다."
+            echo "⚠️ [안내] SSH Secrets가 설정되지 않아 배포를 건너뜁니다."
           fi
 
       - name: Deploy to Remote Server via SSH
         if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: GITHUB_ACTOR,GITHUB_TOKEN
           script_stop: true
           script: |
-            echo "🚀 [Deploy] Checking server environment..."
+            set -e
+            echo "🚀 [Deploy] Starting deployment on production server..."
 
-            # 1. Docker 설치 여부 확인 및 자동 설치
-            if ! command -v docker &> /dev/null; then
-              echo "📦 Installing Docker and Docker Compose..."
-              sudo apt-get update -y
-              sudo apt-get install -y docker.io docker-compose-v2
-              sudo usermod -aG docker $USER || true
-            fi
-
-            # 2. 저장소 디렉토리 없으면 자동 클론
+            # 1. 설정 저장소 디렉터리 확인
             if [ ! -d "$HOME/inflatest2026" ]; then
-              echo "📥 Cloning repository..."
               git clone https://github.com/black4758/inflatest2026.git "$HOME/inflatest2026"
             fi
 
             cd "$HOME/inflatest2026"
 
-            # 3. 최신 코드 풀
-            echo "🔄 Pulling latest main branch..."
-            git pull origin main
+            # 2. docker-compose.yml 및 Nginx 설정 파일 최신화
+            git fetch origin main
+            git reset --hard origin/main
 
-            # 4. .env 파일이 없으면 .env.example 기반으로 자동 생성
-            if [ ! -f .env ]; then
-              echo "⚙️ Creating .env from .env.example..."
-              cp .env.example .env
-            fi
+            # 3. Private GHCR 로그인 (GitHub Token으로 안전하게 자동 인증)
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "$GITHUB_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-            # 5. 도커 컴포즈 빌드 및 실행
-            echo "🐳 Starting containers via Docker Compose..."
-            sudo docker compose up -d --build
+            # 4. GHCR에서 최신 빌드 완료된 이미지 Pull (Private 인증 완료)
+            echo "📥 Pulling latest pre-built images from GHCR..."
+            docker compose pull || sudo docker compose pull
 
-            # 6. 실행 상태 출력
-            sudo docker compose ps
-            echo "✅ Deployment Finished Successfully!"
+            # 5. 컨테이너 갱신 실행 (단 3~5초 소요)
+            echo "🐳 Restarting containers..."
+            docker compose up -d --remove-orphans || sudo docker compose up -d --remove-orphans
 
+            # 6. 이전 빌드 찌꺼기 이미지 정리 (디스크 용량 폭탄 방지)
+            docker image prune -f || sudo docker image prune -f
+
+            echo "✅ Deployment finished successfully without server overhead!"

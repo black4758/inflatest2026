@@ -14,9 +14,7 @@ services:
 
   # 2. Frontend (React SPA 정적 파일 서빙)
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/black4758/inflatest2026/frontend:latest #
     container_name: infra-frontend
     restart: always
     # 외부 포트 노출 불필요 (gateway를 통해서만 접근)
@@ -25,9 +23,7 @@ services:
 
   # 3. Backend (Spring Boot 4.x / Java 21)
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/black4758/inflatest2026/backend:latest # <-- GHCR 이미지로 교체
     container_name: infra-backend
     restart: always
     # 외부 포트 노출 불필요 (gateway를 통해서만 접근)
