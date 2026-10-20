@@ -1,0 +1,26 @@
+# Environment and Secrets
+.env
+*.local
+*.log
+
+# OS & IDE
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# Backend (Gradle / Java)
+backend/.gradle/
+backend/build/
+backend/out/
+backend/.project
+backend/.classpath
+backend/.settings/
+
+# Frontend (Node / React)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Volumes / Data
+mysql_data/
