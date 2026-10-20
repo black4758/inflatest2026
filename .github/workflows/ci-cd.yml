@@ -130,9 +130,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 백엔드 변경 시: JAR 빌드 후 백엔드 도커 이미지 푸시
+      # 백엔드 도커 이미지 빌드 & 푸시
       - name: Set up JDK 21 (Backend Packaging)
-        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-java@v4
         with:
           java-version: '21'
@@ -140,13 +139,11 @@ jobs:
           cache: 'gradle'
 
       - name: Build Backend JAR
-        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           chmod +x backend/gradlew
           cd backend && ./gradlew bootJar -x test
 
       - name: Build & Push Backend Docker Image
-        if: needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -155,9 +152,8 @@ jobs:
             ghcr.io/${{ github.repository }}/backend:latest
             ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
 
-      # 프론트엔드 변경 시: 프론트엔드 도커 이미지 푸시
+      # 프론트엔드 도커 이미지 빌드 & 푸시
       - name: Build & Push Frontend Docker Image
-        if: needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
@@ -206,6 +202,9 @@ jobs:
             set -e
             echo "🚀 [Deploy] Starting deployment on production server..."
 
+            # 0. Docker 소켓 권한 정리 (permission denied 방지)
+            sudo chmod 666 /var/run/docker.sock || true
+
             # 1. 설정 저장소 디렉터리 확인
             if [ ! -d "$HOME/inflatest2026" ]; then
               git clone https://github.com/black4758/inflatest2026.git "$HOME/inflatest2026"
@@ -217,18 +216,16 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # 3. Private GHCR 로그인 (GitHub Token으로 안전하게 자동 인증)
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "$GITHUB_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-            # 4. GHCR에서 최신 빌드 완료된 이미지 Pull (Private 인증 완료)
+            # 3. GHCR에서 최신 빌드 완료된 이미지 Pull
             echo "📥 Pulling latest pre-built images from GHCR..."
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || true
             docker compose pull || sudo docker compose pull
 
-            # 5. 컨테이너 갱신 실행 (단 3~5초 소요)
+            # 4. 컨테이너 갱신 실행 (단 3~5초 소요)
             echo "🐳 Restarting containers..."
             docker compose up -d --remove-orphans || sudo docker compose up -d --remove-orphans
 
-            # 6. 이전 빌드 찌꺼기 이미지 정리 (디스크 용량 폭탄 방지)
+            # 5. 이전 빌드 찌꺼기 이미지 정리
             docker image prune -f || sudo docker image prune -f
 
             echo "✅ Deployment finished successfully without server overhead!"
