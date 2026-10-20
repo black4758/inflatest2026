@@ -1,29 +1,62 @@
-name: CI/CD Pipeline
+name: CI/CD Optimized Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - '.env.example'
+      - 'LICENSE'
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - '.env.example'
+      - 'LICENSE'
   workflow_dispatch:
-
-permissions:
-  contents: read
-  packages: write
 
 jobs:
   # ========================================================
-  # 1. CI (Continuous Integration): Test & Build Verification
+  # 1. 어떤 영역의 코드가 변경되었는지 감지 (Path Filter)
   # ========================================================
-  ci:
-    name: Build & Test (Backend + Frontend)
+  detect-changes:
+    name: Detect Changed Paths
     runs-on: ubuntu-latest
-
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ----------------- Backend CI -----------------
+      - name: Check for file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            infra:
+              - 'docker-compose.yml'
+              - 'nginx/**'
+
+  # ========================================================
+  # 2. 백엔드 코드 변경 시에만 실행되는 빌드 & 테스트
+  # ========================================================
+  backend-ci:
+    name: Backend Test (Java 21 / Spring Boot)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -34,11 +67,22 @@ jobs:
       - name: Grant Execute Permission to gradlew
         run: chmod +x backend/gradlew
 
-      - name: Build & Test Backend with Gradle
+      - name: Run Backend Tests
         working-directory: backend
         run: ./gradlew check
 
-      # ----------------- Frontend CI -----------------
+  # ========================================================
+  # 3. 프론트엔드 코드 변경 시에만 실행되는 빌드
+  # ========================================================
+  frontend-ci:
+    name: Frontend Build (React 19 / Vite)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -46,82 +90,51 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install Frontend Dependencies
+      - name: Install Dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Build Frontend
+      - name: Build Frontend Production Bundle
         working-directory: frontend
         run: npm run build
 
-      # ----------------- Docker Compose Verification -----------------
-      - name: Validate Docker Compose Configuration
-        run: |
-          cp .env.example .env
-          docker compose config
-
   # ========================================================
-  # 2. CD (Continuous Deployment): Container Build & Push
+  # 4. 서버 원격 자동 배포 (main 브랜치 푸시 시)
   # ========================================================
-  cd:
-    name: Build & Push Docker Images to GHCR
-    needs: ci
+  deploy:
+    name: Deploy to Server via SSH
+    needs: [detect-changes, backend-ci, frontend-ci]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.backend-ci.result == 'success' || needs.backend-ci.result == 'skipped') &&
+      (needs.frontend-ci.result == 'success' || needs.frontend-ci.result == 'skipped') &&
+      !(needs.backend-ci.result == 'failure' || needs.frontend-ci.result == 'failure') &&
+      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.infra == 'true')
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: actions/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Lowercase Repository Name
-        id: repo_name
+      - name: Check if Deployment Secrets are configured
+        id: check_secrets
         run: |
-          echo "IMAGE_PREFIX=ghcr.io/${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+          if [ -n "${{ secrets.SERVER_HOST }}" ] && [ -n "${{ secrets.SERVER_USER }}" ] && [ -n "${{ secrets.SERVER_SSH_KEY }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️ [안내] SERVER_HOST / USER / SSH_KEY Secrets가 아직 등록되지 않아 SSH 배포를 건너뜁니다."
+          fi
 
-      # Build & Push Backend
-      - name: Build and Push Backend Image
-        uses: docker/build-push-action@v5
+      - name: Deploy to Remote Server via SSH
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          context: ./backend
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/infra-backend:latest
-            ${{ env.IMAGE_PREFIX }}/infra-backend:${{ github.sha }}
-
-      # Build & Push Frontend
-      - name: Build and Push Frontend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/infra-frontend:latest
-            ${{ env.IMAGE_PREFIX }}/infra-frontend:${{ github.sha }}
-
-      # (선택 사항) 배포 서버 SSH 자동 배포 단계
-      # 서버 배포가 필요한 경우 GitHub Repo -> Settings -> Secrets and variables -> Actions 에서
-      # SERVER_HOST, SERVER_USER, SERVER_SSH_KEY 를 등록하고 아래 주석을 해제하면 자동 배포됩니다.
-      # - name: Deploy to Target Server via SSH
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   if: env.SERVER_HOST != ''
-      #   env:
-      #     SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      #   with:
-      #     host: ${{ secrets.SERVER_HOST }}
-      #     username: ${{ secrets.SERVER_USER }}
-      #     key: ${{ secrets.SERVER_SSH_KEY }}
-      #     script: |
-      #       cd /opt/inflatest2026
-      #       git pull origin main
-      #       docker compose pull
-      #       docker compose up -d
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            echo "🚀 Starting Deployment on Server..."
+            cd ~/inflatest2026 || cd /opt/inflatest2026
+            git pull origin main
+            docker compose up -d --build
+            echo "✅ Deployment Finished Successfully!"
