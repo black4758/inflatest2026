@@ -32,9 +32,15 @@ public class DataInitializer implements CommandLineRunner {
                     .build());
 
                 postRepository.save(Post.builder()
-                    .title("헬스 체크 엔드포인트 안내 (/api/health)")
-                    .content("상단의 헬스 상태 바 또는 /api/health 및 /actuator/health 를 통해 DB 연결 상태, 호스트 이름, 메모리 사용량을 실시간 모니터링할 수 있습니다.")
+                    .title("헬스 체크 엔드포인트 안내 (/actuator/health)")
+                    .content("상단의 헬스 상태 바 또는 /actuator/health 를 통해 DB 연결 상태, 디스크 용량, 헬스 프로브를 실시간 모니터링할 수 있습니다.")
                     .author("인프라팀")
+                    .build());
+
+                postRepository.save(Post.builder()
+                    .title("GitHub Actions 스마트 CI/CD 파이프라인 연동 완료")
+                    .content("경로 기반 필터링(Path Filter)을 통해 백엔드와 프론트엔드의 변경 사항만 선별하여 자동 빌드 및 배포가 수행됩니다.")
+                    .author("데브옵스")
                     .build());
                 log.info("Initial board data seeded successfully.");
             }

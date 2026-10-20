@@ -163,7 +163,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="brand-title">Infra Test CRUD Board</h1>
-            <p className="brand-subtitle">Spring Boot 4.x + MySQL + Actuator 검증 대시보드</p>
+            <p className="brand-subtitle">Spring Boot 4.x + MySQL + Actuator • CI/CD v1.1.0</p>
           </div>
         </div>
 
