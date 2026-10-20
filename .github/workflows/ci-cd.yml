@@ -1,0 +1,127 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ========================================================
+  # 1. CI (Continuous Integration): Test & Build Verification
+  # ========================================================
+  ci:
+    name: Build & Test (Backend + Frontend)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------- Backend CI -----------------
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission to gradlew
+        run: chmod +x backend/gradlew
+
+      - name: Build & Test Backend with Gradle
+        working-directory: backend
+        run: ./gradlew check
+
+      # ----------------- Frontend CI -----------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: npm run build
+
+      # ----------------- Docker Compose Verification -----------------
+      - name: Validate Docker Compose Configuration
+        run: |
+          cp .env.example .env
+          docker compose config
+
+  # ========================================================
+  # 2. CD (Continuous Deployment): Container Build & Push
+  # ========================================================
+  cd:
+    name: Build & Push Docker Images to GHCR
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase Repository Name
+        id: repo_name
+        run: |
+          echo "IMAGE_PREFIX=ghcr.io/${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
+      # Build & Push Backend
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/infra-backend:latest
+            ${{ env.IMAGE_PREFIX }}/infra-backend:${{ github.sha }}
+
+      # Build & Push Frontend
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/infra-frontend:latest
+            ${{ env.IMAGE_PREFIX }}/infra-frontend:${{ github.sha }}
+
+      # (선택 사항) 배포 서버 SSH 자동 배포 단계
+      # 서버 배포가 필요한 경우 GitHub Repo -> Settings -> Secrets and variables -> Actions 에서
+      # SERVER_HOST, SERVER_USER, SERVER_SSH_KEY 를 등록하고 아래 주석을 해제하면 자동 배포됩니다.
+      # - name: Deploy to Target Server via SSH
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   if: env.SERVER_HOST != ''
+      #   env:
+      #     SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      #   with:
+      #     host: ${{ secrets.SERVER_HOST }}
+      #     username: ${{ secrets.SERVER_USER }}
+      #     key: ${{ secrets.SERVER_SSH_KEY }}
+      #     script: |
+      #       cd /opt/inflatest2026
+      #       git pull origin main
+      #       docker compose pull
+      #       docker compose up -d
