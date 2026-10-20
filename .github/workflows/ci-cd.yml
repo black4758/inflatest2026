@@ -105,7 +105,7 @@ jobs:
         run: npm run build
 
   # ========================================================
-  # 4. CI 러너에서 이미지 빌드 및 GHCR 푸시 (main 브랜치 푸시 시)
+  # 4. CI 러너에서 이미지 빌드 및 GHCR 푸시
   # ========================================================
   build-and-push:
     name: Build & Push Images to GHCR
@@ -118,7 +118,7 @@ jobs:
       (needs.backend-ci.result == 'success' || needs.backend-ci.result == 'skipped') &&
       (needs.frontend-ci.result == 'success' || needs.frontend-ci.result == 'skipped') &&
       !(needs.backend-ci.result == 'failure' || needs.frontend-ci.result == 'failure') &&
-      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true')
+      (needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.infra == 'true')
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -163,7 +163,7 @@ jobs:
             ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
 
   # ========================================================
-  # 5. 서버 원격 배포 (서버 빌드 제거, 경량 이미지 Pull & 갱신)
+  # 5. 서버 원격 배포 (Public 이미지 초고속 Pull & 갱신)
   # ========================================================
   deploy:
     name: Deploy to Server via SSH
@@ -189,43 +189,38 @@ jobs:
       - name: Deploy to Remote Server via SSH
         if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: GITHUB_ACTOR,GITHUB_TOKEN
           script_stop: true
           script: |
             set -e
             echo "🚀 [Deploy] Starting deployment on production server..."
 
-            # 0. Docker 소켓 권한 정리 (permission denied 방지)
+            # 0. Docker 소켓 권한 부여
             sudo chmod 666 /var/run/docker.sock || true
 
-            # 1. 설정 저장소 디렉터리 확인
+            # 1. 디렉터리 확인
             if [ ! -d "$HOME/inflatest2026" ]; then
               git clone https://github.com/black4758/inflatest2026.git "$HOME/inflatest2026"
             fi
 
             cd "$HOME/inflatest2026"
 
-            # 2. docker-compose.yml 및 Nginx 설정 파일 최신화
+            # 2. 최신 코드 동기화
             git fetch origin main
             git reset --hard origin/main
 
-            # 3. GHCR에서 최신 빌드 완료된 이미지 Pull
+            # 3. 최신 이미지 당겨오기 (Public 패키지이므로 로그인 불필요)
             echo "📥 Pulling latest pre-built images from GHCR..."
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || true
             docker compose pull || sudo docker compose pull
 
-            # 4. 컨테이너 갱신 실행 (단 3~5초 소요)
+            # 4. 컨테이너 갱신 실행
             echo "🐳 Restarting containers..."
             docker compose up -d --remove-orphans || sudo docker compose up -d --remove-orphans
 
-            # 5. 이전 빌드 찌꺼기 이미지 정리
+            # 5. 미사용 찌꺼기 이미지 정리
             docker image prune -f || sudo docker image prune -f
 
             echo "✅ Deployment finished successfully without server overhead!"
