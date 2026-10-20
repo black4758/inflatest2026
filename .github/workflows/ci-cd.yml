@@ -132,9 +132,41 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: true
           script: |
-            echo "🚀 Starting Deployment on Server..."
-            cd ~/inflatest2026 || cd /opt/inflatest2026
+            echo "🚀 [Deploy] Checking server environment..."
+
+            # 1. Docker 설치 여부 확인 및 자동 설치
+            if ! command -v docker &> /dev/null; then
+              echo "📦 Installing Docker and Docker Compose..."
+              sudo apt-get update -y
+              sudo apt-get install -y docker.io docker-compose-v2
+              sudo usermod -aG docker $USER || true
+            fi
+
+            # 2. 저장소 디렉토리 없으면 자동 클론
+            if [ ! -d "$HOME/inflatest2026" ]; then
+              echo "📥 Cloning repository..."
+              git clone https://github.com/black4758/inflatest2026.git "$HOME/inflatest2026"
+            fi
+
+            cd "$HOME/inflatest2026"
+
+            # 3. 최신 코드 풀
+            echo "🔄 Pulling latest main branch..."
             git pull origin main
-            docker compose up -d --build
+
+            # 4. .env 파일이 없으면 .env.example 기반으로 자동 생성
+            if [ ! -f .env ]; then
+              echo "⚙️ Creating .env from .env.example..."
+              cp .env.example .env
+            fi
+
+            # 5. 도커 컴포즈 빌드 및 실행
+            echo "🐳 Starting containers via Docker Compose..."
+            sudo docker compose up -d --build
+
+            # 6. 실행 상태 출력
+            sudo docker compose ps
             echo "✅ Deployment Finished Successfully!"
+
