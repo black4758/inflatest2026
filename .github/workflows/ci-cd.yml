@@ -130,8 +130,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 백엔드 도커 이미지 빌드 & 푸시
+      # 백엔드 도커 이미지 빌드 & 푸시 (백엔드 코드 변경 시에만 실행)
       - name: Set up JDK 21 (Backend Packaging)
+        if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: actions/setup-java@v4
         with:
           java-version: '21'
@@ -139,11 +140,13 @@ jobs:
           cache: 'gradle'
 
       - name: Build Backend JAR
+        if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
         run: |
           chmod +x backend/gradlew
           cd backend && ./gradlew bootJar -x test
 
       - name: Build & Push Backend Docker Image
+        if: ${{ needs.detect-changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: docker/build-push-action@v5
         with:
           context: ./backend
@@ -152,8 +155,9 @@ jobs:
             ghcr.io/${{ github.repository }}/backend:latest
             ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
 
-      # 프론트엔드 도커 이미지 빌드 & 푸시
+      # 프론트엔드 도커 이미지 빌드 & 푸시 (프론트엔드 코드 변경 시에만 실행)
       - name: Build & Push Frontend Docker Image
+        if: ${{ needs.detect-changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
