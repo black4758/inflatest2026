@@ -196,10 +196,7 @@ jobs:
           script_stop: true
           script: |
             set -e
-            echo "🚀 [Deploy] Starting deployment on production server..."
-
-            # 0. Docker 소켓 권한 부여
-            sudo chmod 666 /var/run/docker.sock || true
+            echo "🚀 [Deploy] Triggering Blue/Green Zero-Downtime Deployment..."
 
             # 1. 디렉터리 확인
             if [ ! -d "$HOME/inflatest2026" ]; then
@@ -212,15 +209,6 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # 3. 최신 이미지 당겨오기 (Public 패키지이므로 로그인 불필요)
-            echo "📥 Pulling latest pre-built images from GHCR..."
-            docker compose pull || sudo docker compose pull
-
-            # 4. 컨테이너 갱신 실행
-            echo "🐳 Restarting containers..."
-            docker compose up -d --remove-orphans || sudo docker compose up -d --remove-orphans
-
-            # 5. 미사용 찌꺼기 이미지 정리
-            docker image prune -f || sudo docker image prune -f
-
-            echo "✅ Deployment finished successfully without server overhead!"
+            # 3. Blue/Green 무중단 배포 스크립트 실행 (Swap 메모리 점검 + 헬스체크 + Nginx 무중단 스위칭)
+            chmod +x deploy.sh
+            ./deploy.sh
