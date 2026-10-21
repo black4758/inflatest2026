@@ -173,37 +173,37 @@
     },
     {
       "id": 6,
-      "title": "💾 서버 여유 디스크 용량",
+      "title": "🚨 백엔드 ERROR 로그 발생 건수",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "short",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 2000000000 }
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
             ]
           }
         }
       },
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
+        "colorMode": "background",
+        "graphMode": "area",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "targets": [
         {
-          "expr": "disk_free_bytes{job=\"spring-boot-backend\"}",
+          "expr": "sum(logback_events_total{job=\"spring-boot-backend\", level=\"error\"})",
           "refId": "A"
         }
       ]
     },
     {
       "id": 7,
-      "title": "🌐 초당 HTTP API 요청 수 (RPS - URI별)",
+      "title": "🌐 초당 게시판 API 요청 수 (RPS - 헬스체크 제외)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -215,7 +215,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (method, uri, status) (rate(http_server_requests_seconds_count{job=\"spring-boot-backend\", uri!=\"/actuator/prometheus\"}[1m]))",
+          "expr": "sum by (method, uri, status) (rate(http_server_requests_seconds_count{job=\"spring-boot-backend\", uri!~\"/actuator/.*\"}[1m]))",
           "legendFormat": "{{method}} {{uri}} ({{status}})",
           "refId": "A"
         }
@@ -223,7 +223,7 @@
     },
     {
       "id": 8,
-      "title": "⚡ API 평균 응답 시간 (Latency)",
+      "title": "⚡ 게시판 API 평균 응답 시간 (Latency - 헬스체크 제외)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -235,7 +235,7 @@
       },
       "targets": [
         {
-          "expr": "rate(http_server_requests_seconds_sum{job=\"spring-boot-backend\", uri!=\"/actuator/prometheus\"}[1m]) / rate(http_server_requests_seconds_count{job=\"spring-boot-backend\", uri!=\"/actuator/prometheus\"}[1m])",
+          "expr": "rate(http_server_requests_seconds_sum{job=\"spring-boot-backend\", uri!~\"/actuator/.*\"}[1m]) / rate(http_server_requests_seconds_count{job=\"spring-boot-backend\", uri!~\"/actuator/.*\"}[1m])",
           "legendFormat": "{{method}} {{uri}}",
           "refId": "A"
         }
@@ -358,7 +358,7 @@
     },
     {
       "id": 13,
-      "title": "🌐 Nginx Gateway 실시간 접속 & 에러 로그",
+      "title": "🌐 Nginx Gateway 사용자 접속 로그 (/actuator 제외)",
       "type": "logs",
       "gridPos": { "h": 10, "w": 10, "x": 14, "y": 20 },
       "datasource": { "type": "loki", "uid": "loki" },
@@ -374,7 +374,7 @@
       },
       "targets": [
         {
-          "expr": "{service=\"gateway\"}",
+          "expr": "{service=\"gateway\"} != \"/actuator/\"",
           "refId": "A"
         }
       ]

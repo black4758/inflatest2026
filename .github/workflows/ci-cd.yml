@@ -219,7 +219,8 @@ jobs:
               exit 1
             fi
 
-            # .env에서 GRAFANA_ADMIN_PASSWORD 읽기
+            # .env에서 GRAFANA_ADMIN_USER 및 GRAFANA_ADMIN_PASSWORD 읽기
+            SERVER_GRAFANA_USER=$(grep -E '^GRAFANA_ADMIN_USER=' .env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
             SERVER_GRAFANA_PW=$(grep -E '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
 
             # 2. Docker 권한 확인, 만료된 GHCR 토큰 정리 및 이전 단일 컨테이너 정리
@@ -237,6 +238,12 @@ jobs:
             if [ -n "$SERVER_GRAFANA_PW" ]; then
               docker exec infra-grafana grafana cli admin reset-admin-password "$SERVER_GRAFANA_PW" >/dev/null 2>&1 || \
                 sudo docker exec infra-grafana grafana cli admin reset-admin-password "$SERVER_GRAFANA_PW" >/dev/null 2>&1 || true
+            fi
+            if [ -n "$SERVER_GRAFANA_USER" ] && [ -n "$SERVER_GRAFANA_PW" ]; then
+              jq -n --slurpfile dash ./grafana/provisioning/dashboards/spring-boot-dashboard.json '{dashboard: $dash[0], overwrite: true, folderId: 0}' | \
+                curl -s -u "$SERVER_GRAFANA_USER:$SERVER_GRAFANA_PW" -H "Content-Type: application/json" -X POST -d @- http://localhost:3000/api/dashboards/db >/dev/null 2>&1 || \
+                jq -n --slurpfile dash ./grafana/provisioning/dashboards/spring-boot-dashboard.json '{dashboard: $dash[0], overwrite: true, folderId: 0}' | \
+                docker exec -i infra-grafana curl -s -u "$SERVER_GRAFANA_USER:$SERVER_GRAFANA_PW" -H "Content-Type: application/json" -X POST -d @- http://localhost:3000/api/dashboards/db >/dev/null 2>&1 || true
             fi
 
             # 4. 활성 컨테이너 감지 및 배포 대상 결정 (Blue vs Green)

@@ -170,3 +170,50 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0.9]
+
+      # 4. Spring Boot 500 서버 에러 (ERROR 로그) 발생 감지
+      - uid: alert_backend_error_log
+        title: "[긴급] Spring Boot 백엔드 ERROR 로그 발생"
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "Spring Boot 백엔드에서 ERROR 로그(500 예외)가 발생했습니다!"
+          description: "최근 1분 이내에 백엔드 애플리케이션에서 ERROR 레벨 로그가 감지되었습니다. Grafana 실시간 로그 창을 확인하세요."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(increase(logback_events_total{job="spring-boot-backend", level="error"}[1m]))
+              instant: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
