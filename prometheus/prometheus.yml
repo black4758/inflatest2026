@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # 1. Prometheus 자체 상태 수집
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 2. Spring Boot 백엔드 (Nginx Gateway를 통해 현재 활성화된 Blue 또는 Green 컨테이너 자동 수집)
+  - job_name: 'spring-boot-backend'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['gateway:80']
+        labels:
+          application: 'board-backend'

@@ -49,6 +49,8 @@ jobs:
             infra:
               - 'docker-compose.yml'
               - 'nginx/**'
+              - 'prometheus/**'
+              - 'grafana/**'
               - '.github/**'
 
   # ========================================================
@@ -197,6 +199,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          timeout: 60s
           script: |
             set -e
             echo "=================================================="
@@ -220,11 +223,11 @@ jobs:
             sudo docker logout ghcr.io 2>/dev/null || true
             docker rm -f infra-backend 2>/dev/null || sudo docker rm -f infra-backend 2>/dev/null || true
 
-            # 3. 최신 이미지 당겨오기 & 기본 인프라 가동
+            # 3. 최신 이미지 당겨오기 & 기본 인프라(MySQL, Frontend, Prometheus, Grafana) 가동
             echo "📥 Pulling latest images from GHCR..."
             docker compose pull || sudo docker compose pull
-            echo "🚀 Ensuring MySQL and Frontend are running..."
-            docker compose up -d mysql frontend || sudo docker compose up -d mysql frontend
+            echo "🚀 Ensuring MySQL, Frontend, Prometheus, and Grafana are running..."
+            docker compose up -d mysql frontend prometheus grafana || sudo docker compose up -d mysql frontend prometheus grafana
 
             # 4. 활성 컨테이너 감지 및 배포 대상 결정 (Blue vs Green)
             IS_BLUE=$(docker ps -q -f name=infra-backend-blue 2>/dev/null || sudo docker ps -q -f name=infra-backend-blue 2>/dev/null || true)
@@ -314,6 +317,7 @@ jobs:
             if [ -z "$GATEWAY_RUNNING" ] || [ "$SSL_NEWLY_CREATED" = "true" ]; then
               docker compose up -d --force-recreate gateway || sudo docker compose up -d --force-recreate gateway
             else
+              docker cp ./nginx/nginx.conf infra-gateway:/etc/nginx/nginx.conf 2>/dev/null || sudo docker cp ./nginx/nginx.conf infra-gateway:/etc/nginx/nginx.conf 2>/dev/null || true
               docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
                 sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload"
             fi
