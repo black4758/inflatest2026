@@ -219,8 +219,7 @@ jobs:
               exit 1
             fi
 
-            # .env에서 SLACK_WEBHOOK_URL 및 GRAFANA_ADMIN_PASSWORD 읽기
-            SERVER_SLACK_WEBHOOK=$(grep -E '^SLACK_WEBHOOK_URL=' .env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+            # .env에서 GRAFANA_ADMIN_PASSWORD 읽기
             SERVER_GRAFANA_PW=$(grep -E '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
 
             # 2. Docker 권한 확인, 만료된 GHCR 토큰 정리 및 이전 단일 컨테이너 정리
@@ -233,8 +232,8 @@ jobs:
             echo "📥 Pulling latest images from GHCR..."
             docker compose pull || sudo docker compose pull
             echo "🚀 Ensuring MySQL, Frontend, Prometheus, Loki, Promtail, and Grafana are running..."
-            docker compose up -d mysql frontend prometheus loki promtail || sudo docker compose up -d mysql frontend prometheus loki promtail
-            docker compose up -d --force-recreate grafana || sudo docker compose up -d --force-recreate grafana
+            docker compose up -d mysql frontend prometheus loki || sudo docker compose up -d mysql frontend prometheus loki
+            docker compose up -d --force-recreate promtail grafana || sudo docker compose up -d --force-recreate promtail grafana
             if [ -n "$SERVER_GRAFANA_PW" ]; then
               docker exec infra-grafana grafana cli admin reset-admin-password "$SERVER_GRAFANA_PW" >/dev/null 2>&1 || \
                 sudo docker exec infra-grafana grafana cli admin reset-admin-password "$SERVER_GRAFANA_PW" >/dev/null 2>&1 || true
@@ -300,11 +299,6 @@ jobs:
                 echo "기존 서비스($OLD_SERVICE)를 유지하고 새 컨테이너($TARGET_SERVICE)를 중지합니다."
                 docker compose stop $TARGET_SERVICE 2>/dev/null || sudo docker compose stop $TARGET_SERVICE 2>/dev/null || true
               fi
-              if [ -n "$SERVER_SLACK_WEBHOOK" ]; then
-                curl -s -H "Content-Type: application/json" -X POST \
-                  -d "{\"text\":\"🚨 *[배포 실패]* $TARGET_SERVICE 헬스체크 실패로 이전 버전($OLD_SERVICE)을 유지했습니다.\n• *서비스*: https://infla.koreacentral.cloudapp.azure.com\"}" \
-                  "$SERVER_SLACK_WEBHOOK" >/dev/null 2>&1 || true
-              fi
               sleep 2
               exit 1
             fi
@@ -356,14 +350,6 @@ jobs:
             # 9. 찌꺼기 이미지 정리
             echo "🧹 Cleaning up unused Docker images..."
             docker image prune -f 2>/dev/null || sudo docker image prune -f 2>/dev/null || true
-
-            # 10. 서버 .env의 SLACK_WEBHOOK_URL로 배포 성공 알림 전송
-            if [ -n "$SERVER_SLACK_WEBHOOK" ]; then
-              echo "🔔 Sending Slack notification via server .env..."
-              curl -s -H "Content-Type: application/json" -X POST \
-                -d "{\"text\":\"🎉 *[배포 성공] Blue/Green 무중단 배포 완료 ($TARGET_SERVICE)*\n• *상태*: ✅ 정상 가동 중 (Zero-Downtime)\n• *서비스*: https://infla.koreacentral.cloudapp.azure.com\n• *그라파나 & 실시간 로그*: https://infla.koreacentral.cloudapp.azure.com/grafana/\"}" \
-                "$SERVER_SLACK_WEBHOOK" >/dev/null 2>&1 || true
-            fi
 
             echo "=================================================="
             echo "🎉 [Success] Blue/Green Zero-Downtime Deployment Finished!"

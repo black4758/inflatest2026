@@ -12,7 +12,9 @@ scrape_configs:
   - job_name: docker-containers
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
-        refresh_interval: 5s
+        refresh_interval: 2s
+    pipeline_stages:
+      - docker: {}
     relabel_configs:
       # 컨테이너 이름 (예: /infra-backend-blue -> infra-backend-blue)
       - source_labels: ['__meta_docker_container_name']
@@ -24,3 +26,7 @@ scrape_configs:
       # 로그 스트림 (stdout / stderr)
       - source_labels: ['__meta_docker_container_log_stream']
         target_label: 'stream'
+      # 컨테이너 시작 시점의 초기 부팅 로그(Spring Boot 배너 등)까지 첫 줄부터 모두 파일에서 읽어오도록 설정
+      - source_labels: ['__meta_docker_container_id']
+        target_label: '__path__'
+        replacement: '/var/lib/docker/containers/$1/*-json.log'

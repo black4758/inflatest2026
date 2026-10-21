@@ -46,6 +46,7 @@ public class PostService {
 
     @Transactional
     public PostResponse getPostById(Long id) {
+        log.info("Fetching post detail for ID: {}", id);
         Post post = postRepository.findById(id)
             .orElseThrow(() -> new NoSuchElementException("게시글을 찾을 수 없습니다. ID: " + id));
         postRepository.incrementViewCount(id);
