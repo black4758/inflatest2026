@@ -314,10 +314,17 @@ jobs:
             echo "server $TARGET_SERVICE:8080;" > "$UPSTREAM_CONF"
 
             GATEWAY_RUNNING=$(docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || sudo docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || true)
-            if [ -z "$GATEWAY_RUNNING" ] || [ "$SSL_NEWLY_CREATED" = "true" ]; then
+            NGINX_CONF_CHANGED=false
+            if [ -n "$GATEWAY_RUNNING" ]; then
+              if ! (docker exec infra-gateway cat /etc/nginx/nginx.conf 2>/dev/null || sudo docker exec infra-gateway cat /etc/nginx/nginx.conf 2>/dev/null) | cmp -s - ./nginx/nginx.conf; then
+                NGINX_CONF_CHANGED=true
+              fi
+            fi
+
+            if [ -z "$GATEWAY_RUNNING" ] || [ "$SSL_NEWLY_CREATED" = "true" ] || [ "$NGINX_CONF_CHANGED" = "true" ]; then
+              echo "🔄 Nginx 설정 변경 감지 — Gateway 컨테이너를 새 설정으로 재구동합니다..."
               docker compose up -d --force-recreate gateway || sudo docker compose up -d --force-recreate gateway
             else
-              docker cp ./nginx/nginx.conf infra-gateway:/etc/nginx/nginx.conf 2>/dev/null || sudo docker cp ./nginx/nginx.conf infra-gateway:/etc/nginx/nginx.conf 2>/dev/null || true
               docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
                 sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload"
             fi
