@@ -25,8 +25,17 @@ public class PostController {
     private final PostService postService;
 
     @GetMapping
-    public ResponseEntity<List<PostResponse>> getAllPosts(@RequestParam(value = "keyword", required = false) String keyword) {
-        List<PostResponse> posts = postService.getAllPosts(keyword);
+    public ResponseEntity<List<PostResponse>> getAllPosts(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "sortBy", required = false, defaultValue = "latest") String sortBy) {
+        List<PostResponse> posts = postService.getAllPosts(keyword, sortBy);
+        return ResponseEntity.ok(posts);
+    }
+
+    @GetMapping("/popular")
+    public ResponseEntity<List<PostResponse>> getPopularPosts(
+            @RequestParam(value = "keyword", required = false) String keyword) {
+        List<PostResponse> posts = postService.getAllPosts(keyword, "views");
         return ResponseEntity.ok(posts);
     }
 

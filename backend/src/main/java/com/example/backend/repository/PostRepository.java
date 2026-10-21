@@ -14,8 +14,13 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     List<Post> findAllByOrderByCreatedAtDesc();
 
+    List<Post> findAllByOrderByViewCountDescCreatedAtDesc();
+
     @Query("SELECT p FROM Post p WHERE LOWER(p.title) LIKE LOWER(CONCAT('%', :kw, '%')) OR LOWER(p.content) LIKE LOWER(CONCAT('%', :kw, '%')) OR LOWER(p.author) LIKE LOWER(CONCAT('%', :kw, '%')) ORDER BY p.createdAt DESC")
     List<Post> searchPosts(@Param("kw") String keyword);
+
+    @Query("SELECT p FROM Post p WHERE LOWER(p.title) LIKE LOWER(CONCAT('%', :kw, '%')) OR LOWER(p.content) LIKE LOWER(CONCAT('%', :kw, '%')) OR LOWER(p.author) LIKE LOWER(CONCAT('%', :kw, '%')) ORDER BY p.viewCount DESC, p.createdAt DESC")
+    List<Post> searchPostsOrderByViewCountDesc(@Param("kw") String keyword);
 
     @Modifying
     @Query("UPDATE Post p SET p.viewCount = p.viewCount + 1 WHERE p.id = :id")

@@ -17,8 +17,12 @@ export async function fetchHealth() {
   }
 }
 
-export async function fetchPosts(keyword = '') {
-  const url = keyword ? `${API_BASE}/api/posts?keyword=${encodeURIComponent(keyword)}` : `${API_BASE}/api/posts`;
+export async function fetchPosts(keyword = '', sortBy = 'latest') {
+  const params = new URLSearchParams();
+  if (keyword) params.append('keyword', keyword);
+  if (sortBy) params.append('sortBy', sortBy);
+  const queryString = params.toString();
+  const url = queryString ? `${API_BASE}/api/posts?${queryString}` : `${API_BASE}/api/posts`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`게시글 목록 조회 실패: ${res.status}`);

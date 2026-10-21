@@ -13,7 +13,8 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  Database
+  Database,
+  Flame
 } from 'lucide-react';
 import {
   fetchPosts,
@@ -28,6 +29,7 @@ export default function App() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [sortBy, setSortBy] = useState('latest'); // 'latest' | 'views'
   const [health, setHealth] = useState({ status: 'CHECKING', latency: 0, data: null });
   const [selectedPost, setSelectedPost] = useState(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -48,10 +50,10 @@ export default function App() {
     setHealth(res);
   };
 
-  const loadPosts = async (keyword = '') => {
+  const loadPosts = async (keyword = searchKeyword, sort = sortBy) => {
     setLoading(true);
     try {
-      const data = await fetchPosts(keyword);
+      const data = await fetchPosts(keyword, sort);
       setPosts(data);
     } catch (err) {
       showToast(err.message, 'error');
@@ -62,7 +64,7 @@ export default function App() {
 
   useEffect(() => {
     loadHealth();
-    loadPosts();
+    loadPosts('', 'latest');
 
     const interval = setInterval(() => {
       loadHealth();
@@ -72,7 +74,7 @@ export default function App() {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    loadPosts(searchKeyword);
+    loadPosts(searchKeyword, sortBy);
   };
 
   const openCreateModal = () => {
@@ -120,7 +122,7 @@ export default function App() {
         showToast('새 게시글이 등록되었습니다.');
         setIsCreateOpen(false);
       }
-      loadPosts(searchKeyword);
+      loadPosts(searchKeyword, sortBy);
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -136,7 +138,7 @@ export default function App() {
       if (selectedPost && selectedPost.id === id) {
         setSelectedPost(null);
       }
-      loadPosts(searchKeyword);
+      loadPosts(searchKeyword, sortBy);
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -185,7 +187,7 @@ export default function App() {
             className="btn btn-secondary btn-sm"
             onClick={() => {
               loadHealth();
-              loadPosts(searchKeyword);
+              loadPosts(searchKeyword, sortBy);
             }}
             title="새로고침"
           >
@@ -210,13 +212,39 @@ export default function App() {
               className="modal-close"
               onClick={() => {
                 setSearchKeyword('');
-                loadPosts('');
+                loadPosts('', sortBy);
               }}
             >
               <X size={16} />
             </button>
           )}
         </form>
+
+        {/* Sort Tab Group (최신순 / 조회수순) */}
+        <div className="sort-tab-group">
+          <button
+            type="button"
+            className={`sort-tab ${sortBy === 'latest' ? 'active' : ''}`}
+            onClick={() => {
+              setSortBy('latest');
+              loadPosts(searchKeyword, 'latest');
+            }}
+          >
+            <Clock size={14} />
+            최신순
+          </button>
+          <button
+            type="button"
+            className={`sort-tab ${sortBy === 'views' ? 'active' : ''}`}
+            onClick={() => {
+              setSortBy('views');
+              loadPosts(searchKeyword, 'views');
+            }}
+          >
+            <Flame size={14} />
+            조회수순
+          </button>
+        </div>
 
         <button className="btn btn-primary" onClick={openCreateModal}>
           <Plus size={18} /> 새 글 작성
@@ -229,8 +257,27 @@ export default function App() {
           <div>ID</div>
           <div>제목</div>
           <div>작성자</div>
-          <div>조회수</div>
-          <div>작성일시</div>
+          <div
+            className={`sortable-header ${sortBy === 'views' ? 'active' : ''}`}
+            onClick={() => {
+              const next = sortBy === 'views' ? 'latest' : 'views';
+              setSortBy(next);
+              loadPosts(searchKeyword, next);
+            }}
+            title="클릭하여 조회수 순 정렬"
+          >
+            조회수 {sortBy === 'views' ? '▼' : ''}
+          </div>
+          <div
+            className={`sortable-header ${sortBy === 'latest' ? 'active' : ''}`}
+            onClick={() => {
+              setSortBy('latest');
+              loadPosts(searchKeyword, 'latest');
+            }}
+            title="클릭하여 최신순 정렬"
+          >
+            작성일시 {sortBy === 'latest' ? '▼' : ''}
+          </div>
         </div>
 
         {loading ? (

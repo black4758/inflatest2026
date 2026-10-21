@@ -37,11 +37,11 @@ public class Post {
     private LocalDateTime updatedAt;
 
     @Builder
-    public Post(String title, String content, String author) {
+    public Post(String title, String content, String author, int viewCount) {
         this.title = title;
         this.content = content;
         this.author = author;
-        this.viewCount = 0;
+        this.viewCount = viewCount;
     }
 
     @PrePersist

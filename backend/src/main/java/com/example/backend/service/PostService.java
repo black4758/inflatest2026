@@ -20,15 +20,28 @@ public class PostService {
 
     private final PostRepository postRepository;
 
-    public List<PostResponse> getAllPosts(String keyword) {
+    public List<PostResponse> getAllPosts(String keyword, String sortBy) {
+        boolean isViewsSort = "views".equalsIgnoreCase(sortBy) || "viewCount".equalsIgnoreCase(sortBy);
         List<Post> posts;
         if (keyword != null && !keyword.trim().isEmpty()) {
-            log.info("Searching posts with keyword: {}", keyword);
-            posts = postRepository.searchPosts(keyword.trim());
+            log.info("Searching posts with keyword: {}, sortBy: {}", keyword, sortBy);
+            if (isViewsSort) {
+                posts = postRepository.searchPostsOrderByViewCountDesc(keyword.trim());
+            } else {
+                posts = postRepository.searchPosts(keyword.trim());
+            }
         } else {
-            posts = postRepository.findAllByOrderByCreatedAtDesc();
+            if (isViewsSort) {
+                posts = postRepository.findAllByOrderByViewCountDescCreatedAtDesc();
+            } else {
+                posts = postRepository.findAllByOrderByCreatedAtDesc();
+            }
         }
         return posts.stream().map(PostResponse::from).toList();
+    }
+
+    public List<PostResponse> getAllPosts(String keyword) {
+        return getAllPosts(keyword, "latest");
     }
 
     @Transactional
