@@ -197,7 +197,6 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script_stop: true
           script: |
             set -e
             echo "=================================================="
@@ -295,10 +294,13 @@ jobs:
             echo "🔄 Updating Nginx upstream to $TARGET_SERVICE..."
             echo "server $TARGET_SERVICE:8080;" > "$UPSTREAM_CONF"
 
-            # Gateway 기동 (처음이면 start, 이미 돌고 있으면 reload)
-            docker compose up -d gateway || sudo docker compose up -d gateway
-            docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
-              sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" || true
+            GATEWAY_RUNNING=$(docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || sudo docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || true)
+            if [ -z "$GATEWAY_RUNNING" ]; then
+              docker compose up -d --force-recreate gateway || sudo docker compose up -d --force-recreate gateway
+            else
+              docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
+                sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload"
+            fi
             echo "✨ Traffic successfully routed to $TARGET_SERVICE!"
 
             # 8. 이전 버전 컨테이너 안전 종료
