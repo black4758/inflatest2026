@@ -200,78 +200,50 @@ jobs:
             echo "🚀 [GitHub Actions] Blue/Green Zero-Downtime Deploy"
             echo "=================================================="
 
-            # 1. 디렉터리 확인 및 최신 코드 동기화
-            if [ ! -d "$HOME/inflatest2026" ]; then
-              git clone https://github.com/black4758/inflatest2026.git "$HOME/inflatest2026"
-            fi
-
+            # 1. 최신 코드 동기화
             cd "$HOME/inflatest2026"
             git fetch origin main
             git reset --hard origin/main
 
-            # 2. 서버 Swap 메모리 점검 및 자동 할당 (2GB)
-            SWAP_TOTAL=$(free -m | awk '/^Swap:/ {print $2}')
-            if [ "$SWAP_TOTAL" -eq 0 ]; then
-              echo "💾 Swap 메모리가 설정되어 있지 않아 2GB 가상 메모리를 생성합니다..."
-              sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
-              sudo chmod 600 /swapfile
-              sudo mkswap /swapfile
-              sudo swapon /swapfile
-              if ! grep -q '/swapfile' /etc/fstab; then
-                echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-              fi
-              echo "✅ 2GB Swap 메모리 할당 완료!"
-            else
-              echo "💾 Swap 메모리 정상 작동 중: ${SWAP_TOTAL}MB"
-            fi
-
-            # 3. Docker 소켓 권한 확인
+            # 2. Docker 권한 확인 및 이전 단일 컨테이너 정리
             sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
+            docker rm -f infra-backend 2>/dev/null || sudo docker rm -f infra-backend 2>/dev/null || true
 
-            # 4. 이전 단일 백엔드 컨테이너(infra-backend) 정리
-            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -wq "infra-backend" || sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -wq "infra-backend"; then
-              echo "🧹 이전 단일 백엔드 컨테이너(infra-backend)를 정리합니다..."
-              docker rm -f infra-backend 2>/dev/null || sudo docker rm -f infra-backend 2>/dev/null || true
-            fi
-
-            # 5. 최신 GHCR 이미지 당겨오기
+            # 3. 최신 이미지 당겨오기 & 기본 인프라 가동
             echo "📥 Pulling latest images from GHCR..."
             docker compose pull || sudo docker compose pull
-
-            # MySQL과 Frontend 먼저 안전 가동 (Gateway는 백엔드가 뜬 후에 가동)
             echo "🚀 Ensuring MySQL and Frontend are running..."
             docker compose up -d mysql frontend || sudo docker compose up -d mysql frontend
 
-            # 6. 현재 실행 중인 백엔드 감지 및 타겟 결정 (Blue vs Green)
-            IS_BLUE_RUNNING=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -w "infra-backend-blue" || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -w "infra-backend-blue" || true)
-            IS_GREEN_RUNNING=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -w "infra-backend-green" || sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -w "infra-backend-green" || true)
+            # 4. 활성 컨테이너 감지 및 배포 대상 결정 (Blue vs Green)
+            IS_BLUE=$(docker ps -q -f name=infra-backend-blue || sudo docker ps -q -f name=infra-backend-blue || true)
+            IS_GREEN=$(docker ps -q -f name=infra-backend-green || sudo docker ps -q -f name=infra-backend-green || true)
 
             UPSTREAM_CONF="./nginx/backend-upstream.conf"
 
-            if [ -n "$IS_GREEN_RUNNING" ] && [ -z "$IS_BLUE_RUNNING" ]; then
+            if [ -n "$IS_GREEN" ] && [ -z "$IS_BLUE" ]; then
               TARGET_SERVICE="backend-blue"
               OLD_SERVICE="backend-green"
-            elif [ -n "$IS_BLUE_RUNNING" ] && [ -z "$IS_GREEN_RUNNING" ]; then
+            elif [ -n "$IS_BLUE" ] && [ -z "$IS_GREEN" ]; then
               TARGET_SERVICE="backend-green"
               OLD_SERVICE="backend-blue"
             else
-              # 최초 배포 시 기본 Blue로 시작
               TARGET_SERVICE="backend-blue"
               OLD_SERVICE=""
             fi
 
-            echo "🎯 현재 배포 대상 (새 버전): $TARGET_SERVICE"
+            echo "🎯 배포 대상 (새 버전): $TARGET_SERVICE"
             if [ -n "$OLD_SERVICE" ]; then
-              echo "⏸️ 기존 서비스 중인 대상: $OLD_SERVICE"
+              echo "⏸️ 현재 서비스 중: $OLD_SERVICE"
             else
-              echo "🌱 이전 활성 컨테이너 없음 (최초 배포 또는 초기화 상태)"
+              echo "🌱 최초 배포 상태"
             fi
 
-            # 7. 새 버전 컨테이너 기동
-            echo "🐳 Starting $TARGET_SERVICE container..."
+            # 5. 새 버전 컨테이너 기동
+            echo "🐳 Starting $TARGET_SERVICE..."
             docker compose up -d $TARGET_SERVICE || sudo docker compose up -d $TARGET_SERVICE
 
-            # 8. Actuator 헬스체크 대기 (스프링부트가 UP 될 때까지)
+            # 6. Actuator 헬스체크 대기 (스프링 부트가 완전히 뜰 때까지)
             echo "⏳ Waiting for $TARGET_SERVICE (/actuator/health) to be UP..."
             MAX_RETRIES=35
             RETRY_COUNT=0
@@ -286,12 +258,12 @@ jobs:
                 break
               fi
               RETRY_COUNT=$((RETRY_COUNT+1))
-              echo "Checking $TARGET_SERVICE health ($RETRY_COUNT/$MAX_RETRIES)... Response: ${RAW_RES:-'(starting JVM...)'}"
+              echo "Checking $TARGET_SERVICE health ($RETRY_COUNT/$MAX_RETRIES)... Response: ${RAW_RES:-'(waiting for JVM...)'}"
               sleep 3
             done
 
             if [ "$HEALTHY" != "true" ]; then
-              echo "❌ [배포 실패] $TARGET_SERVICE 헬스체크가 실패했습니다! 컨테이너 최근 로그:"
+              echo "❌ [배포 실패] $TARGET_SERVICE 헬스체크 실패! 최근 로그:"
               docker logs --tail 30 infra-$TARGET_SERVICE 2>/dev/null || sudo docker logs --tail 30 infra-$TARGET_SERVICE 2>/dev/null || true
               if [ -n "$OLD_SERVICE" ]; then
                 echo "기존 서비스($OLD_SERVICE)를 유지하고 새 컨테이너($TARGET_SERVICE)를 중지합니다."
@@ -300,23 +272,23 @@ jobs:
               exit 1
             fi
 
-            # 9. Nginx 트래픽 스위칭 (0.01초 무중단 전환)
+            # 7. Nginx 트래픽 스위칭 (0.01초 무중단 전환)
             echo "🔄 Updating Nginx upstream to $TARGET_SERVICE..."
             echo "server $TARGET_SERVICE:8080;" > "$UPSTREAM_CONF"
 
-            # Gateway 기동 (처음이면 start, 이미 실행 중이면 reload)
+            # Gateway 기동 (처음이면 start, 이미 돌고 있으면 reload)
             docker compose up -d gateway || sudo docker compose up -d gateway
             docker exec infra-gateway nginx -s reload 2>/dev/null || sudo docker exec infra-gateway nginx -s reload 2>/dev/null || true
             echo "✨ Traffic successfully routed to $TARGET_SERVICE!"
 
-            # 10. 기존 이전 버전 컨테이너 안전 종료
+            # 8. 이전 버전 컨테이너 안전 종료
             if [ -n "$OLD_SERVICE" ]; then
               echo "🛑 Stopping and removing previous container: $OLD_SERVICE..."
               docker compose stop $OLD_SERVICE 2>/dev/null || sudo docker compose stop $OLD_SERVICE 2>/dev/null || true
               docker compose rm -f $OLD_SERVICE 2>/dev/null || sudo docker compose rm -f $OLD_SERVICE 2>/dev/null || true
             fi
 
-            # 11. 미사용 찌꺼기 이미지 정리
+            # 9. 찌꺼기 이미지 정리
             echo "🧹 Cleaning up unused Docker images..."
             docker image prune -f 2>/dev/null || sudo docker image prune -f 2>/dev/null || true
 
