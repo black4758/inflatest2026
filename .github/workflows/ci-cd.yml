@@ -204,13 +204,21 @@ jobs:
             echo "🚀 [GitHub Actions] Blue/Green Zero-Downtime Deploy"
             echo "=================================================="
 
-            # 1. 최신 코드 동기화
+            # 1. 최신 코드 동기화 및 .env 파일 검증
             cd "$HOME/inflatest2026"
             git fetch origin main
             git reset --hard origin/main
 
-            # 2. Docker 권한 확인 및 이전 단일 컨테이너 정리
+            if [ ! -f .env ]; then
+              echo "❌ [에러] 서버에 .env 파일이 존재하지 않습니다! ($HOME/inflatest2026/.env)"
+              sleep 2
+              exit 1
+            fi
+
+            # 2. Docker 권한 확인, 만료된 GHCR 토큰 정리 및 이전 단일 컨테이너 정리
             sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
+            docker logout ghcr.io 2>/dev/null || true
+            sudo docker logout ghcr.io 2>/dev/null || true
             docker rm -f infra-backend 2>/dev/null || sudo docker rm -f infra-backend 2>/dev/null || true
 
             # 3. 최신 이미지 당겨오기 & 기본 인프라 가동
@@ -220,15 +228,15 @@ jobs:
             docker compose up -d mysql frontend || sudo docker compose up -d mysql frontend
 
             # 4. 활성 컨테이너 감지 및 배포 대상 결정 (Blue vs Green)
-            IS_BLUE=$(docker ps -q -f name=infra-backend-blue || sudo docker ps -q -f name=infra-backend-blue || true)
-            IS_GREEN=$(docker ps -q -f name=infra-backend-green || sudo docker ps -q -f name=infra-backend-green || true)
+            IS_BLUE=$(docker ps -q -f name=infra-backend-blue 2>/dev/null || sudo docker ps -q -f name=infra-backend-blue 2>/dev/null || true)
+            IS_GREEN=$(docker ps -q -f name=infra-backend-green 2>/dev/null || sudo docker ps -q -f name=infra-backend-green 2>/dev/null || true)
 
             UPSTREAM_CONF="./nginx/backend-upstream.conf"
 
             if [ -n "$IS_GREEN" ] && [ -z "$IS_BLUE" ]; then
               TARGET_SERVICE="backend-blue"
               OLD_SERVICE="backend-green"
-            elif [ -n "$IS_BLUE" ] && [ -z "$IS_GREEN" ]; then
+            elif [ -n "$IS_BLUE" ]; then
               TARGET_SERVICE="backend-green"
               OLD_SERVICE="backend-blue"
             else
@@ -245,7 +253,13 @@ jobs:
 
             # 5. 새 버전 컨테이너 기동
             echo "🐳 Starting $TARGET_SERVICE..."
-            docker compose up -d $TARGET_SERVICE || sudo docker compose up -d $TARGET_SERVICE
+            if ! (docker compose up -d $TARGET_SERVICE || sudo docker compose up -d $TARGET_SERVICE); then
+              echo "❌ [배포 실패] $TARGET_SERVICE 컨테이너 기동에 실패했습니다!"
+              docker compose ps 2>/dev/null || sudo docker compose ps 2>/dev/null || true
+              docker logs --tail 30 infra-mysql 2>&1 || sudo docker logs --tail 30 infra-mysql 2>&1 || true
+              sleep 2
+              exit 1
+            fi
 
             # 6. Actuator 헬스체크 대기 (스프링 부트가 완전히 뜰 때까지)
             echo "⏳ Waiting for $TARGET_SERVICE (/actuator/health) to be UP..."
@@ -268,11 +282,12 @@ jobs:
 
             if [ "$HEALTHY" != "true" ]; then
               echo "❌ [배포 실패] $TARGET_SERVICE 헬스체크 실패! 최근 로그:"
-              docker logs --tail 30 infra-$TARGET_SERVICE 2>/dev/null || sudo docker logs --tail 30 infra-$TARGET_SERVICE 2>/dev/null || true
+              docker logs --tail 30 infra-$TARGET_SERVICE 2>&1 || sudo docker logs --tail 30 infra-$TARGET_SERVICE 2>&1 || true
               if [ -n "$OLD_SERVICE" ]; then
                 echo "기존 서비스($OLD_SERVICE)를 유지하고 새 컨테이너($TARGET_SERVICE)를 중지합니다."
                 docker compose stop $TARGET_SERVICE 2>/dev/null || sudo docker compose stop $TARGET_SERVICE 2>/dev/null || true
               fi
+              sleep 2
               exit 1
             fi
 
@@ -282,7 +297,8 @@ jobs:
 
             # Gateway 기동 (처음이면 start, 이미 돌고 있으면 reload)
             docker compose up -d gateway || sudo docker compose up -d gateway
-            docker exec infra-gateway nginx -s reload 2>/dev/null || sudo docker exec infra-gateway nginx -s reload 2>/dev/null || true
+            docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
+              sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" || true
             echo "✨ Traffic successfully routed to $TARGET_SERVICE!"
 
             # 8. 이전 버전 컨테이너 안전 종료
