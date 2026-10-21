@@ -290,18 +290,34 @@ jobs:
               exit 1
             fi
 
-            # 7. Nginx 트래픽 스위칭 (0.01초 무중단 전환)
+            # 7. SSL 인증서 확인/자동 발급 및 Nginx 트래픽 스위칭 (0.01초 무중단 전환)
+            DOMAIN="infla.koreacentral.cloudapp.azure.com"
+            SSL_NEWLY_CREATED=false
+            if ! sudo test -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; then
+              echo "🔐 Let's Encrypt SSL 인증서를 자동 발급합니다 ($DOMAIN)..."
+              docker compose stop gateway 2>/dev/null || sudo docker compose stop gateway 2>/dev/null || true
+              if ! sudo docker run --rm -p 80:80 -v /etc/letsencrypt:/etc/letsencrypt certbot/certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email; then
+                echo "⚠️ Let's Encrypt 도메인 발급 제한(Rate Limit) 등으로 인해 비상용 자체 서명 SSL 인증서를 생성합니다..."
+                sudo mkdir -p "/etc/letsencrypt/live/$DOMAIN"
+                sudo openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+                  -keyout "/etc/letsencrypt/live/$DOMAIN/privkey.pem" \
+                  -out "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" \
+                  -subj "/CN=$DOMAIN"
+              fi
+              SSL_NEWLY_CREATED=true
+            fi
+
             echo "🔄 Updating Nginx upstream to $TARGET_SERVICE..."
             echo "server $TARGET_SERVICE:8080;" > "$UPSTREAM_CONF"
 
             GATEWAY_RUNNING=$(docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || sudo docker ps -q -f name=infra-gateway -f status=running 2>/dev/null || true)
-            if [ -z "$GATEWAY_RUNNING" ]; then
+            if [ -z "$GATEWAY_RUNNING" ] || [ "$SSL_NEWLY_CREATED" = "true" ]; then
               docker compose up -d --force-recreate gateway || sudo docker compose up -d --force-recreate gateway
             else
               docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload" 2>/dev/null || \
                 sudo docker exec infra-gateway sh -c "echo 'server $TARGET_SERVICE:8080;' > /etc/nginx/conf.d/backend-upstream.conf && nginx -s reload"
             fi
-            echo "✨ Traffic successfully routed to $TARGET_SERVICE!"
+            echo "✨ Traffic successfully routed to $TARGET_SERVICE (HTTPS enabled)!"
 
             # 8. 이전 버전 컨테이너 안전 종료
             if [ -n "$OLD_SERVICE" ]; then

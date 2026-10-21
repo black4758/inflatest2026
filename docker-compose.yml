@@ -1,14 +1,16 @@
 services:
-  # 1. 독립 Gateway Nginx (단일 진입점: 라우팅, 프록시, Blue/Green 스위칭)
+  # 1. 독립 Gateway Nginx (단일 진입점: 라우팅, 프록시, Blue/Green 스위칭, SSL Termination)
   gateway:
     image: nginx:alpine
     container_name: infra-gateway
     restart: always
     ports:
       - "${GATEWAY_PORT:-80}:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/backend-upstream.conf:/etc/nginx/conf.d/backend-upstream.conf
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - frontend
 
