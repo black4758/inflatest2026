@@ -1,7 +1,10 @@
 package com.example.backend.controller;
 
+import com.example.backend.dto.CommentRequest;
+import com.example.backend.dto.CommentResponse;
 import com.example.backend.dto.PostRequest;
 import com.example.backend.dto.PostResponse;
+import com.example.backend.service.AuthService;
 import com.example.backend.service.PostService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +26,7 @@ import java.util.NoSuchElementException;
 public class PostController {
 
     private final PostService postService;
+    private final AuthService authService;
 
     @GetMapping
     public ResponseEntity<List<PostResponse>> getAllPosts(
@@ -46,20 +50,55 @@ public class PostController {
     }
 
     @PostMapping
-    public ResponseEntity<PostResponse> createPost(@Valid @RequestBody PostRequest request) {
-        PostResponse created = postService.createPost(request);
+    public ResponseEntity<PostResponse> createPost(
+            @Valid @RequestBody PostRequest request,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String currentUsername = authService.extractUsernameFromHeader(authHeader);
+        PostResponse created = postService.createPost(request, currentUsername);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<PostResponse> updatePost(@PathVariable("id") Long id, @Valid @RequestBody PostRequest request) {
-        PostResponse updated = postService.updatePost(id, request);
+    public ResponseEntity<PostResponse> updatePost(
+            @PathVariable("id") Long id,
+            @Valid @RequestBody PostRequest request,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String currentUsername = authService.extractUsernameFromHeader(authHeader);
+        PostResponse updated = postService.updatePost(id, request, currentUsername);
         return ResponseEntity.ok(updated);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deletePost(@PathVariable("id") Long id) {
-        postService.deletePost(id);
+    public ResponseEntity<Void> deletePost(
+            @PathVariable("id") Long id,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String currentUsername = authService.extractUsernameFromHeader(authHeader);
+        postService.deletePost(id, currentUsername);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id}/comments")
+    public ResponseEntity<List<CommentResponse>> getComments(@PathVariable("id") Long id) {
+        return ResponseEntity.ok(postService.getComments(id));
+    }
+
+    @PostMapping("/{id}/comments")
+    public ResponseEntity<CommentResponse> createComment(
+            @PathVariable("id") Long id,
+            @Valid @RequestBody CommentRequest request,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String currentUsername = authService.extractUsernameFromHeader(authHeader);
+        CommentResponse created = postService.createComment(id, request, currentUsername);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    @DeleteMapping("/{id}/comments/{commentId}")
+    public ResponseEntity<Void> deleteComment(
+            @PathVariable("id") Long id,
+            @PathVariable("commentId") Long commentId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String currentUsername = authService.extractUsernameFromHeader(authHeader);
+        postService.deleteComment(id, commentId, currentUsername);
         return ResponseEntity.noContent().build();
     }
 
@@ -72,6 +111,24 @@ public class PostController {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
 
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<Map<String, String>> handleUnauthorized(SecurityException ex) {
+        log.warn("Unauthorized request: {}", ex.getMessage());
+        Map<String, String> error = new HashMap<>();
+        error.put("error", "UNAUTHORIZED");
+        error.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleForbidden(IllegalStateException ex) {
+        log.warn("Forbidden request: {}", ex.getMessage());
+        Map<String, String> error = new HashMap<>();
+        error.put("error", "FORBIDDEN");
+        error.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidationErrors(MethodArgumentNotValidException ex) {
         Map<String, String> fieldErrors = new HashMap<>();
@@ -82,6 +139,7 @@ public class PostController {
 
         Map<String, Object> response = new HashMap<>();
         response.put("error", "VALIDATION_FAILED");
+        response.put("message", String.join(", ", fieldErrors.values()));
         response.put("fields", fieldErrors);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }

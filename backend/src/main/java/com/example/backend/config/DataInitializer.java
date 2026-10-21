@@ -1,7 +1,12 @@
 package com.example.backend.config;
 
+import com.example.backend.domain.Comment;
 import com.example.backend.domain.Post;
+import com.example.backend.domain.User;
+import com.example.backend.repository.CommentRepository;
 import com.example.backend.repository.PostRepository;
+import com.example.backend.repository.UserRepository;
+import com.example.backend.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -13,17 +18,33 @@ import org.springframework.stereotype.Component;
 public class DataInitializer implements CommandLineRunner {
 
     private final PostRepository postRepository;
+    private final UserRepository userRepository;
+    private final CommentRepository commentRepository;
+    private final AuthService authService;
 
     @Override
     public void run(String... args) {
         try {
+            if (userRepository.count() == 0) {
+                String defaultHash = authService.hashPassword("1234");
+                userRepository.save(User.builder().username("데브옵스").passwordHash(defaultHash).build());
+                userRepository.save(User.builder().username("인프라팀").passwordHash(defaultHash).build());
+                userRepository.save(User.builder().username("관리자").passwordHash(defaultHash).build());
+            }
+
             if (postRepository.count() == 0) {
                 log.info("Seeding initial board data...");
-                postRepository.save(Post.builder()
+                Post firstPost = postRepository.save(Post.builder()
                     .title("GitHub Actions 스마트 CI/CD 파이프라인 연동 완료")
                     .content("경로 기반 필터링(Path Filter)을 통해 백엔드와 프론트엔드의 변경 사항만 선별하여 자동 빌드 및 배포가 수행됩니다.")
                     .author("데브옵스")
                     .viewCount(128)
+                    .build());
+
+                commentRepository.save(Comment.builder()
+                    .post(firstPost)
+                    .author("인프라팀")
+                    .content("Blue/Green 무중단 배포와 Grafana 모니터링까지 완벽하게 연동되었네요! 👍")
                     .build());
 
                 postRepository.save(Post.builder()

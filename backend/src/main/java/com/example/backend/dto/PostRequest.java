@@ -11,7 +11,6 @@ public record PostRequest(
     @NotBlank(message = "내용은 필수입니다")
     String content,
 
-    @NotBlank(message = "작성자는 필수입니다")
     @Size(max = 50, message = "작성자 이름은 최대 50자까지 가능합니다")
     String author
 ) {}
