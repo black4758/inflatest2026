@@ -94,7 +94,34 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=15d'
 
-  # 6. Grafana (모니터링 시각화 대시보드 - 외부 포트 차단, Nginx /grafana/ 경유 접속)
+  # 6. Loki (로그 저장소 - 외부 포트 차단, 내부망 전용)
+  loki:
+    image: grafana/loki:2.9.10
+    container_name: infra-loki
+    user: "0"
+    restart: always
+    expose:
+      - "3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # 7. Promtail (도커 컨테이너 실시간 로그 수집기 -> Loki로 전송)
+  promtail:
+    image: grafana/promtail:2.9.10
+    container_name: infra-promtail
+    user: "0"
+    restart: always
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  # 8. Grafana (모니터링 시각화 대시보드 - 외부 포트 차단, Nginx /grafana/ 경유 접속)
   grafana:
     image: grafana/grafana:latest
     container_name: infra-grafana
@@ -112,8 +139,10 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+      - loki
 
 volumes:
   mysql_data:
   prometheus_data:
+  loki_data:
   grafana_data:
