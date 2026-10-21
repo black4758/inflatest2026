@@ -1,0 +1,172 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Slack-24h-Monitor
+    receivers:
+      - uid: slack_receiver
+        type: slack
+        settings:
+          url: ${SLACK_WEBHOOK_URL}
+          title: |
+            🚨 [24시간 실시간 장애 경보] {{ .CommonLabels.alertname }}
+          text: |
+            {{ range .Alerts -}}
+            • *상태*: {{ if eq .Status "firing" }}🔥 장애 발생 (FIRING){{ else }}✅ 정상 복구 (RESOLVED){{ end }}
+            • *요약*: {{ .Annotations.summary }}
+            • *상세 내용*: {{ .Annotations.description }}
+            • *대시보드 확인*: https://infla.koreacentral.cloudapp.azure.com/grafana/
+            {{ end -}}
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: Slack-24h-Monitor
+    group_by: ['alertname']
+    group_wait: 10s
+    group_interval: 5m
+    repeat_interval: 1h
+
+groups:
+  - orgId: 1
+    name: Infra-24h-Alert-Rules
+    folder: Spring Boot Monitoring
+    interval: 10s
+    rules:
+      # 1. 백엔드 서버 DOWN 감지 (30초 이상 응답 없을 때)
+      - uid: alert_backend_down
+        title: "[긴급] Spring Boot 백엔드 서버 DOWN"
+        condition: C
+        for: 30s
+        noDataState: Alerting
+        execErrState: Alerting
+        annotations:
+          summary: "Spring Boot 백엔드 컨테이너가 응답하지 않습니다!"
+          description: "현재 활성화된 백엔드(Blue/Green)의 /actuator/prometheus 수집이 30초 이상 중단되었습니다. 즉시 확인이 필요합니다."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job="spring-boot-backend"}
+              instant: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # 2. 시스템 CPU 사용률 90% 초과 감지 (1분 이상 지속 시)
+      - uid: alert_high_cpu
+        title: "[경고] 서버 CPU 사용률 90% 초과"
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "서버 CPU 사용률이 90%를 초과했습니다!"
+          description: "1분 이상 CPU 사용률이 90% 이상 유지되고 있습니다. 무한 루프나 트래픽 폭주를 점검하세요."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: system_cpu_usage{job="spring-boot-backend"}
+              instant: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: mean
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.9]
+
+      # 3. JVM 힙 메모리 90% 초과 감지 (OOM 위험)
+      - uid: alert_high_jvm_memory
+        title: "[경고] Spring Boot JVM 힙 메모리 90% 초과 (OOM 위험)"
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "JVM 힙 메모리 사용량이 90%를 넘어 OutOfMemory 위험 상태입니다!"
+          description: "메모리 누수(Memory Leak) 또는 대량 데이터 조회 여부를 확인하세요."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(jvm_memory_used_bytes{job="spring-boot-backend", area="heap"}) / sum(jvm_memory_max_bytes{job="spring-boot-backend", area="heap"})
+              instant: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: mean
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.9]
